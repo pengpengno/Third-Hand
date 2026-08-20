@@ -111,21 +111,26 @@ def _create_p1_data_lineage(connection: sqlite3.Connection) -> None:
     connection.executescript("""
     CREATE TABLE IF NOT EXISTS data_source_registry (
       source_key TEXT PRIMARY KEY, provider TEXT NOT NULL, data_class TEXT NOT NULL,
-      retention_days INTEGER NOT NULL, revision_policy TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
+      retention_days INTEGER NOT NULL, revision_policy TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS raw_data_snapshots (
-      snapshot_id TEXT PRIMARY KEY, source_key TEXT NOT NULL, symbol TEXT, data_class TEXT NOT NULL,
-      effective_at TEXT, available_at TEXT NOT NULL, retrieved_at TEXT NOT NULL, payload_hash TEXT NOT NULL,
-      payload TEXT NOT NULL, supersedes_snapshot_id TEXT, created_at TEXT NOT NULL
+      snapshot_id TEXT PRIMARY KEY, source_key TEXT NOT NULL, symbol TEXT,
+      data_class TEXT NOT NULL, effective_at TEXT, available_at TEXT NOT NULL,
+      retrieved_at TEXT NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL,
+      supersedes_snapshot_id TEXT, created_at TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_raw_data_snapshots_lookup ON raw_data_snapshots(symbol, data_class, available_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_raw_data_snapshots_lookup
+      ON raw_data_snapshots(symbol, data_class, available_at DESC);
     CREATE TABLE IF NOT EXISTS data_quality_events (
-      event_id TEXT PRIMARY KEY, symbol TEXT, source_key TEXT NOT NULL, event_type TEXT NOT NULL,
-      severity TEXT NOT NULL, observed_at TEXT NOT NULL, payload TEXT NOT NULL
+      event_id TEXT PRIMARY KEY, symbol TEXT, source_key TEXT NOT NULL,
+      event_type TEXT NOT NULL, severity TEXT NOT NULL, observed_at TEXT NOT NULL,
+      payload TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS feature_catalog (
       feature_key TEXT NOT NULL, version TEXT NOT NULL, definition_json TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, PRIMARY KEY(feature_key, version)
+      enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+      PRIMARY KEY(feature_key, version)
     );
     CREATE TABLE IF NOT EXISTS feature_values (
       context_id TEXT NOT NULL, feature_key TEXT NOT NULL, feature_version TEXT NOT NULL,
@@ -150,7 +155,7 @@ def _create_simulation_run_audit(connection: sqlite3.Connection) -> None:
     """Persist one run_id per paper-trading pass plus every observable stage.
 
     A simulation run covers candidate selection, market quotes, daily history,
-    risk, news, decision, execution and the final equity snapshot.  Each symbol
+    risk, news, decision, execution and the final equity snapshot. Each symbol
     additionally gets a terminal state so a pass that does not trade still has
     an explicit, queryable reason.
     """
@@ -212,7 +217,7 @@ def _create_data_provider_health(connection: sqlite3.Connection) -> None:
     """Track per-provider health and circuit state for daily-history sources.
 
     A provider opens its circuit after repeated failures and stays closed for a
-    cooldown; a successful attempt closes it again.  The table also powers the
+    cooldown; a successful attempt closes it again. The table also powers the
     auto-backfill queue so stocks that failed data preparation are retried
     after the provider recovers.
     """
@@ -267,9 +272,6 @@ def _create_paper_execution_safety_contract(connection: sqlite3.Connection) -> N
     columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(paper_position_lots)")}
     if "sellable_at" not in columns:
         connection.execute("ALTER TABLE paper_position_lots ADD COLUMN sellable_at TEXT")
-    # Materialize a deterministic timestamp for legacy lots. A malformed legacy
-    # timestamp deliberately remains NULL and therefore non-sellable until the
-    # existing reconciliation path can establish its provenance.
     from app.trading_calendar import TradingCalendarService
     calendar = TradingCalendarService()
     pending_rows = connection.execute(
@@ -324,6 +326,17 @@ def _create_paper_position_episodes(connection: sqlite3.Connection) -> None:
     )
 
 
+def _add_pux1_watchlist_metadata(connection: sqlite3.Connection) -> None:
+    """Add durable user-attention metadata to the existing Watchlist table."""
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(watchlist)")}
+    if "enabled" not in columns:
+        connection.execute("ALTER TABLE watchlist ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+    if "priority" not in columns:
+        connection.execute("ALTER TABLE watchlist ADD COLUMN priority TEXT NOT NULL DEFAULT 'NORMAL'")
+    if "note" not in columns:
+        connection.execute("ALTER TABLE watchlist ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+
+
 MIGRATIONS = (
     Migration("0001_legacy_schema_baseline", _record_legacy_schema_baseline),
     Migration("0002_decision_contexts", _create_decision_contexts),
@@ -343,6 +356,7 @@ MIGRATIONS = (
     Migration("0016_broker_settlement_receipts", _create_broker_settlement_receipts),
     Migration("0017_paper_execution_safety_contract", _create_paper_execution_safety_contract),
     Migration("0018_paper_position_episodes", _create_paper_position_episodes),
+    Migration("0019_pux1_watchlist_metadata", _add_pux1_watchlist_metadata),
 )
 
 
