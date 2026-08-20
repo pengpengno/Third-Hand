@@ -11,6 +11,7 @@ from app.api.v1.admin.router import create_admin_diagnostics_router
 from app.api.v1.candidate.router import create_candidate_router
 from app.api.v1.decision.workspace_router import create_decision_workspace_router
 from app.api.v1.paper.router import create_paper_schedule_router
+from app.api.v1.personal_universe.router import create_personal_universe_router
 from app.api.v1.research.company_router import create_company_intelligence_router
 from app.application_services.admin.day0_diagnostics import Day0DiagnosticsService
 from app.application_services.candidate.service import CandidateService
@@ -19,11 +20,41 @@ from app.application_services.company.provider_registry import CompanyDataProvid
 from app.application_services.company.service import CompanyIntelligenceService
 from app.application_services.decision.workspace import DecisionWorkspaceService
 from app.application_services.market.symbol_search_service import SymbolSearchService
+from app.application_services.personal_universe.service import PersonalUniverseService
 from app.application_services.research.data_gateway import ResearchDataGateway
 from app.infrastructure.database.candidate_repository import CandidateRepository
 from app.infrastructure.database.company_intelligence_repository import CompanyIntelligenceRepository
+from app.infrastructure.database.personal_universe_repository import PersonalUniverseRepository
 from app.infrastructure.database.research_data_repository import ResearchDataRepository
 from app.infrastructure.database.symbol_search_repository import SymbolSearchRepository
+
+
+def register_personal_universe_routes(application) -> None:
+    """Install the Personal Universe service and routes idempotently.
+
+    FastAPI 0.141 / Starlette 1.6 may wrap included router entries such that
+    inspecting ``application.app.routes`` no longer exposes the original path on
+    every outer entry. Route-path introspection is therefore not a reliable
+    idempotency guard. Keep an explicit bootstrap sentinel instead.
+    """
+    if not hasattr(application, "personal_universe_service_v2"):
+        repository = PersonalUniverseRepository(application.store)
+        application.personal_universe_repository_v2 = repository
+        application.personal_universe_service_v2 = PersonalUniverseService(
+            application.store,
+            repository,
+        )
+
+    if getattr(application, "_personal_universe_routes_registered_v2", False):
+        return
+
+    application.app.include_router(
+        create_personal_universe_router(
+            application.personal_universe_service_v2,
+            application.personal_universe_repository_v2,
+        )
+    )
+    application._personal_universe_routes_registered_v2 = True
 
 
 def register_v2_routes(application) -> None:
@@ -36,6 +67,8 @@ def register_v2_routes(application) -> None:
         repository = CandidateRepository(application.store)
         application.candidate_repository_v2 = repository
         application.candidate_service_v2 = CandidateService(repository)
+
+    register_personal_universe_routes(application)
 
     if not hasattr(application, "symbol_search_service_v2"):
         symbol_repository = SymbolSearchRepository(application.store)
